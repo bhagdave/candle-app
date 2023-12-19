@@ -10,6 +10,7 @@ use orca::{
     record::{pdf::Pdf, Spin},
 };
 use serde_json::json;
+use serde::Serialize;
 use std::fs;
 use std::path::Path;
 
@@ -23,6 +24,12 @@ struct Args {
     #[clap(long)]
     /// The prompt to use to query the index
     prompt: String,
+}
+
+#[derive(Serialize)]
+struct Payload {
+    id: usize,
+    content: String,
 }
 
 #[tokio::main]
@@ -54,11 +61,20 @@ async fn main() {
             println!("Qdrant client created");
             if qdrant.create_collection(&collection, 384).await.is_ok() {
                 let bert = Bert::new().build_model_and_tokenizer().await.unwrap();
-                for content in &content_vec {
+                let mut embeddings_vec = Vec::new();
+                let mut payloads_vec = Vec::new();
+
+                for (index, content) in content_vec.iter().enumerate() {
                     let embeddings_response = bert.generate_embeddings(prompts!(&[content.clone()])).await.unwrap();
                     let embeddings = embeddings_response.to_vec().unwrap();
-                    qdrant.insert(&collection, embeddings.clone(), content.clone()).await.unwrap();
+                    let payload = Payload { id: index, content: content.clone() };
+                    let payload_json = serde_json::to_string(&payload).unwrap();
+
+                    embeddings_vec.push(embeddings);
+                    payloads_vec.push(payload_json);
                 }
+
+                qdrant.insert_many(&collection, embeddings_vec, payloads_vec).await.unwrap();
             } else {
                 println!("Collection already exists");
             }
