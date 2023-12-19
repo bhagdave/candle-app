@@ -41,7 +41,28 @@ async fn main() {
     match file_type {
         "txt" => {
             println!("txt file");
-        }
+            let contents = fs::read_to_string(&args.file).expect("Something went wrong reading the file");
+            println!("Text file contents created");
+            let content_vec: Vec<String> = contents.lines().map(|line| line.to_string()).collect();
+            println!("Text file contents vector created");
+            let collection = std::path::Path::new(&args.file)
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("default_collection")
+                .to_string();
+            let qdrant = Qdrant::new("http://localhost:6334");
+            println!("Qdrant client created");
+            if qdrant.create_collection(&collection, 384).await.is_ok() {
+                let bert = Bert::new().build_model_and_tokenizer().await.unwrap();
+                for content in &content_vec {
+                    let embeddings_response = bert.generate_embeddings(prompts!(&[content.clone()])).await.unwrap();
+                    let embeddings = embeddings_response.to_vec().unwrap();
+                    qdrant.insert(&collection, embeddings.clone(), content.clone()).await.unwrap();
+                }
+            } else {
+                println!("Collection already exists");
+            }
+       }
         "pdf" => {
             println!("pdf file");
             let pdf_records = Pdf::from_file(&args.file, false).spin().unwrap().split(399);
@@ -54,6 +75,7 @@ async fn main() {
                 .to_string();
 
             let qdrant = Qdrant::new("http://localhost:6334");
+            println!("Qdrant client created");
             if qdrant.create_collection(&collection, 384).await.is_ok() {
                 let embeddings = bert.generate_embeddings(prompts!(&pdf_records)).await.unwrap();
                 qdrant.insert_many(&collection, embeddings.to_vec2().unwrap(), pdf_records).await.unwrap();
@@ -96,7 +118,7 @@ async fn main() {
             let mistral = Quantized::new()
                 .with_model(orca::llm::quantized::Model::Mistral7bInstruct)
                 .with_sample_len(7500)
-                .load_model_from_path("../../models/mistral-7b-instruct-v0.1.Q4_K_S.gguf")
+                .load_model_from_path("/home/dave/Projects/candle-app/models/mistral-7b-instruct-v0.1.Q4_K_S.gguf")
                 .unwrap()
                 .build_model()
                 .unwrap();
